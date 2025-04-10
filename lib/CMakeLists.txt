@@ -1,0 +1,12 @@
+set(PBOCHECKER_LIB_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/bikey.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bisign.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/pbo.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/pbochecker.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/pbochecker.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/pbocheckerprinter.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/pbocheckerprinterqt.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/pbocheckerprinterqt.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/pboheader.h
+    PARENT_SCOPE
+)

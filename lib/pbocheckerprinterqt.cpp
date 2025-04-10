@@ -1,0 +1,46 @@
+#include "pbocheckerprinterqt.h"
+
+#include <QString>
+
+void PboCheckerPrinterQt::printHeader(const QString& biKeyName, const QString& mod)
+{
+    out_ << "\nVerification Report" << Qt::endl
+         << "===================" << Qt::endl;
+    if (!mod.isEmpty())
+    {
+        out_ << "Mod: " << mod << Qt::endl;
+    }
+    out_ << "Key: " << biKeyName << Qt::endl << Qt::endl;
+}
+
+void PboCheckerPrinterQt::printResult(const QString& fileName, bool success, const QString& extra)
+{
+    QString statusStr = success ? " \033[32mOK\033[0m " : "\033[31mFAIL\033[0m";
+    out_ << statusStr << " " << fileName;
+    if (extra.isEmpty())
+    {
+        out_ << Qt::endl;
+    }
+    else
+    {
+        out_ << " (" << extra << ")" << Qt::endl;
+    }
+}
+
+void PboCheckerPrinterQt::println(const QString& line) {
+    out_ << line << Qt::endl;
+}
+
+void PboCheckerPrinterQt::printWarn(const QString& line) {
+    out_ << "Warning: " << line << Qt::endl;
+}
+
+void PboCheckerPrinterQt::printSuccessMsg()
+{
+    out_ << "\nVerification successful\n";
+}
+
+void PboCheckerPrinterQt::printFailureMsg()
+{
+    out_ << "\nVerification failed\n";
+}
