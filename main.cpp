@@ -3,8 +3,11 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QStringLiteral>
 
 #include "pbochecker.h"
+
+using namespace Qt::StringLiterals;
 
 void printHelp(const QString& appName)
 {
@@ -30,18 +33,18 @@ int main(int argc, char *argv[])
     QCoreApplication app{argc, argv};
     PboChecker pboChecker;
     const auto exeName = QFileInfo{QCoreApplication::applicationFilePath()}.fileName();
-    app.setApplicationVersion("0.1");
+    app.setApplicationVersion(u"0.1"_s);
 
     QCommandLineParser parser;
     parser.addVersionOption();
-    parser.addOption(QCommandLineOption("verbose", "Enable verbose output"));
-    parser.addOption(QCommandLineOption("help", "Show help"));
+    parser.addOption(QCommandLineOption(u"verbose"_s, u"Enable verbose output"_s));
+    parser.addOption(QCommandLineOption(u"help"_s, u"Show help"_s));
     parser.process(app);
 
-    if (parser.isSet("verbose")) {
+    if (parser.isSet(u"verbose"_s)) {
         pboChecker.setVerbose(true);
     }
-    if (parser.isSet("help")) {
+    if (parser.isSet(u"help"_s)) {
         printHelp(exeName);
         return 0;
     }
@@ -56,13 +59,13 @@ int main(int argc, char *argv[])
     {
         const auto path = args.at(0);
         QFileInfo fileInfo{path};
-        if (fileInfo.isFile() && fileInfo.suffix().toLower() == "pbo")
+        if (fileInfo.isFile() && fileInfo.suffix().toLower() == "pbo"_L1)
         {
             return get<0>(pboChecker.checkPbo(path)) ? 0 : 1;
         }
         if (fileInfo.isDir())
         {
-            if (fileInfo.fileName().startsWith('@'))
+            if (fileInfo.fileName().startsWith('@'_L1))
             {
                 return get<0>(pboChecker.checkMod(path));
             }

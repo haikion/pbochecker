@@ -99,3 +99,16 @@ TEST_F(PboCheckerTest, checkPboIfa)
     const bool success = get<0>(pboChecker.checkPbo(pbo, bikey, bisigin));
     ASSERT_TRUE(success);
 }
+
+// This mod has two keys. Both of them should be tried.
+TEST_F(PboCheckerTest, checkPboFataA3)
+{
+    PboChecker pboChecker;
+    const auto pbo = u":/@fata_a3/addons/FATALighting.pbo"_s;
+    ASSERT_TRUE(QFile::exists(pbo));
+    const auto bisigin = u":/@fata_a3/addons/FATALighting.pbo.LatestLightingTunty.bisign"_s;
+    ASSERT_TRUE(QFile::exists(bisigin));
+    const bool success = get<0>(pboChecker.checkPbo(pbo));
+    ASSERT_TRUE(success);
+}
+

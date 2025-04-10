@@ -24,13 +24,18 @@ public:
     PboChecker();
     virtual ~PboChecker();
 
+    /**
+     * @brief checkPbo
+     * Validates a PBO file against its signature
+     * @param pboPath
+     * @param bikeyPath
+     * @param bisignPath
+     * @return A tuple containing a boolean indicating success (true if valid) and a string with additional information
+     * eg. reason for failure or warnings.
+     */
     std::tuple<bool, QString> checkPbo(const QString& pboPath,
                                  QString bikeyPath = {},
                                  QString bisignPath = {}) const;
-    std::tuple<bool, QString> checkPbo(Pbo& pbo, const QString& bikeyPath, const QString& bisignPath) const;
-    QString findBikeyPath(const QString& modPath) const;
-    QString findBikeyPathWithPbo(const QString& pboFilePath) const;
-    QString findBisignFilePath(const QString& pboFilePath) const;
     /**
     * @brief Validates all PBO files in a mod directory against their signatures
     * @param path Path to the mod directory containing addons and keys folders
@@ -49,11 +54,11 @@ private:
     std::atomic<bool> verbose_{false};
     QObject worker_;
 
+    std::tuple<bool, QString> checkPbo(Pbo& pbo, const QString& bikeyPath, const QString& bisignPath) const;
     QByteArray nameHash(const QList<PboHeader>& headers) const;
     std::tuple<bool, QString> checkPboPriv(const QString& pboPath,
                                  QString bikeyPath = {},
                                  QString bisignPath = {}) const;
-    static QString casedPath(const QString& path);
     QByteArray fileHash(QList<PboHeader>& headers, quint32 version, QFile& pboFile) const;
     std::optional<BiSign> readBisign(const QString& filePath) const;
     std::optional<QByteArray> readPboChecksum(QFile& file) const;

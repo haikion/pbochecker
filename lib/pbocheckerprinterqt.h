@@ -10,7 +10,7 @@ class PboCheckerPrinterQt: public PboCheckerPrinter
 public:
     PboCheckerPrinterQt() = default;
 
-    void printHeader(const QString& biKeyName, const QString& mod = {}) override;
+    void printHeader(const QString& keysStr, const QString& mod) override;
     void printResult(const QString& fileName, bool success, const QString& reason = {}) override;
     void println(const QString& line) override;
     void printWarn(const QString& line) override;

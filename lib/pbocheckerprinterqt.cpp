@@ -2,15 +2,18 @@
 
 #include <QString>
 
-void PboCheckerPrinterQt::printHeader(const QString& biKeyName, const QString& mod)
+void PboCheckerPrinterQt::printHeader(const QString& keysStr, const QString& mod)
 {
     out_ << "\nVerification Report" << Qt::endl
          << "===================" << Qt::endl;
     if (!mod.isEmpty())
     {
-        out_ << "Mod: " << mod << Qt::endl;
+        out_ << "Mod:  " << mod << Qt::endl;
     }
-    out_ << "Key: " << biKeyName << Qt::endl << Qt::endl;
+    // Keys: key1.bikey, key2.bikey
+    // or
+    // Key: key1.bikey
+    out_  << keysStr << Qt::endl << Qt::endl;
 }
 
 void PboCheckerPrinterQt::printResult(const QString& fileName, bool success, const QString& extra)

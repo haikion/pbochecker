@@ -40,6 +40,53 @@ using std::reverse;
 using std::sort;
 using std::unique_ptr;
 
+QString toKeysStr(const QStringList& keyPaths)
+{
+    QString retVal = keyPaths.size() > 1 ? u"Keys: "_s : u"Key:  "_s;;
+    for (auto i = 0; i < keyPaths.size(); ++i)
+    {
+        const auto name = QFileInfo(keyPaths.at(i)).fileName();
+        if (i == keyPaths.size() -1)
+        {
+            retVal += name;
+        }
+        else
+        {
+            retVal += name + u", "_s;
+        }
+    }
+    return retVal;
+}
+
+QString casedPath(const QString& path)
+{
+    QString pathCi = QFileInfo(path).absoluteFilePath();
+    // Construct case sentive path by comparing file or dir names to case sensitive ones.
+    QStringList ciNames = pathCi.split('/'_L1);
+    QString casedPath = ciNames.first().endsWith(':'_L1) ? ciNames.first() + '/'_L1
+                                                                     : u"/"_s;
+    ciNames.removeFirst(); // Drive letter on windows or "" on linux.
+
+    for (const QString& ciName : ciNames)
+    {
+        QDirIterator it(casedPath);
+        while (true)
+        {
+            if (!it.hasNext())
+            {
+                return {};
+            }
+            QFileInfo fi = it.nextFileInfo();
+            if (fi.fileName().compare(ciName, Qt::CaseInsensitive) == 0)
+            {
+                casedPath += (casedPath.endsWith('/'_L1) ? QString{} : u"/"_s) + fi.fileName();
+                break;
+            }
+        }
+    }
+    return casedPath;
+}
+
 unique_ptr<BIGNUM, decltype(&BN_free)> toBIGNUM(const QByteArray& byteArray)
 {
     Q_ASSERT(byteArray.size() > 0);
@@ -120,7 +167,7 @@ QString fillHeaders(Pbo& pbo, QFile& file)
     }
     const auto remainingBytes = file.size() - dataBlockStart;
     return remainingBytes == 21 ? QString{}
-        : QString{"Incorrect amount of bytes after data block: " + QString::number(remainingBytes)};
+        : u"Incorrect amount of bytes after data block: "_s + QString::number(remainingBytes);
 }
 
 QByteArray padHash(const QByteArray& hash, quint32 size)
@@ -228,6 +275,42 @@ bool checkSig3(BN_CTX* ctx, const BiKey& publicKey, const BiSign& bisign, const 
     bool match = BN_cmp(realHash3.get(), signedHash3.get()) == 0;
     return match;
 }
+
+QStringList findBikeysInDir(const QString& dirPath)
+{
+    const auto cPath = casedPath(dirPath);
+    QDir keysDir{cPath};
+    keysDir.setNameFilters({u"*.bikey"_s});
+    QStringList bikeyFiles = keysDir.entryList(QDir::Files | QDir::NoSymLinks);
+    QStringList absolutePaths;
+    for (const auto& file : bikeyFiles)
+    {
+        absolutePaths.append(keysDir.absoluteFilePath(file));
+    }
+    return absolutePaths;
+}
+
+QStringList findBikeyPathsWithPbo(const QString& pboFilePath)
+{
+    // Look for bikey files in ../keys directory relative to the PBO file
+    QDir dir{pboFilePath};
+    dir.cdUp();
+    dir.cdUp();
+    return findBikeysInDir(dir.absoluteFilePath(u"keys"_s));
+}
+
+QString findBisignFilePath(const QString& pboFilePath)
+{
+    const QFileInfo pboFileInfo(pboFilePath);
+    QDir pboDir = pboFileInfo.absoluteDir();
+    const QString pboBaseName = pboFileInfo.completeBaseName();
+    QStringList filters;
+    filters << pboBaseName + u"*.bisign"_s;
+    pboDir.setNameFilters(filters);
+    QStringList bisignFiles = pboDir.entryList();
+    return bisignFiles.isEmpty() ? QString{} : pboDir.absoluteFilePath(bisignFiles.first());
+}
+
 } // namespace
 
 PboChecker::PboChecker()
@@ -244,21 +327,42 @@ PboChecker::~PboChecker()
 }
 
 tuple<bool, QString> PboChecker::checkPbo(const QString& pboPath,
-                                               QString bikeyPath,
-                                               QString bisignPath) const
+                                              QString bikeyPath,
+                                              QString bisignPath) const
 {
     tuple<bool, QString> retVal;
+    const auto pboName = QFileInfo{pboPath}.fileName();
     if (bikeyPath.isEmpty())
     {
-        bikeyPath = findBikeyPathWithPbo(pboPath);
-        if (bikeyPath.isEmpty())
+        QStringList bikeyPaths = findBikeyPathsWithPbo(pboPath);
+        if (bikeyPaths.isEmpty())
         {
             retVal = {false, u"bikey not found"_s};
+            printer_->printResult(QFileInfo{pboPath}.fileName(), false, u"bikey not found"_s);
+            printer_->printFailureMsg();
+            return retVal;
         }
+        for (const auto& keyPath : bikeyPaths)
+        {
+            retVal = checkPboPriv(pboPath, keyPath, bisignPath);
+            if (get<0>(retVal))
+            {
+                printer_->printHeader(u"Key: "_s + QFileInfo{keyPath}.fileName());
+                printer_->printResult(pboName, true, get<1>(retVal));
+                printer_->printSuccessMsg();
+                return retVal;
+            }
+        }
+        printer_->printHeader(toKeysStr(bikeyPaths));
+        printer_->printResult(pboName, false, get<1>(retVal));
+        printer_->printFailureMsg();
+        return retVal;
     }
-    printer_->printHeader(QFileInfo{bikeyPath}.fileName());
+
+    // User specified bikey
+    printer_->printHeader(u"Key: "_s + QFileInfo{bikeyPath}.fileName());
     retVal = checkPboPriv(pboPath, bikeyPath, bisignPath);
-    printer_->printResult(QFileInfo{pboPath}.fileName(), get<0>(retVal), get<1>(retVal));
+    printer_->printResult(pboName, get<0>(retVal), get<1>(retVal));
     if (get<0>(retVal))
     {
         printer_->printSuccessMsg();
@@ -274,12 +378,23 @@ tuple<bool, QString> PboChecker::checkPboPriv(const QString& pboPath, QString bi
 {
     if (bikeyPath.isEmpty())
     {
-        bikeyPath = findBikeyPathWithPbo(pboPath);
-        if (bikeyPath.isEmpty())
+        QStringList bikeyPaths = findBikeyPathsWithPbo(pboPath);
+        if (bikeyPaths.isEmpty())
         {
             return {false, u"bikey not found"_s};
         }
+        
+        for (const auto& keyPath : bikeyPaths)
+        {
+            auto result = checkPboPriv(pboPath, keyPath, bisignPath);
+            if (get<0>(result))
+            {
+                return result;
+            }
+        }
+        return {false, u"Failed with all available keys"_s};
     }
+    
     if (bisignPath.isEmpty()) {
         bisignPath = findBisignFilePath(pboPath);
         if (bisignPath.isEmpty())
@@ -297,29 +412,29 @@ tuple<bool, QString> PboChecker::checkPbo(Pbo& pbo, const QString& bikeyPath, co
     optional<BiKey> publicKeyOpt = readBiPublicKey(bikeyPath);
     if (!publicKeyOpt.has_value())
     {
-        return {false, "Failed to read public key: " + bikeyPath};
+        return {false, u"Failed to read public key: "_s + bikeyPath};
     }
     auto publicKey = publicKeyOpt.value();
     optional<BiSign> bisignOpt = readBisign(bisignPath);
     if (!bisignOpt.has_value())
     {
-        return {false, "Failed to read bisign file: " + bisignPath};
+        return {false, u"Failed to read bisign file: "_s + bisignPath};
     }
     const auto& bisign = bisignOpt.value();
     QFile pboFile{pbo.filePath};
     if (!pboFile.open(QIODevice::ReadOnly))
     {
-        return {false, "Failed to open PBO file: " + pbo.filePath};
+        return {false, u"Failed to open PBO file: "_s + pbo.filePath};
     }
     optional<QByteArray> checksumOpt = readPboChecksum(pboFile);
     if (!checksumOpt.has_value())
     {
-        return {false, "Failed to read checksum from PBO file:" + pbo.filePath};
+        return {false, u"Failed to read checksum from PBO file:"_s + pbo.filePath};
     }
     pbo.checksum = checksumOpt.value();
     if (!checkSign1(ctx_.get(), publicKey, bisign.sig1, pbo.checksum))
     {
-        return {false, "Signature 1 mismatch"};
+        return {false, u"Signature 1 mismatch"_s};
     }
     auto error = fillHeaders(pbo, pboFile);
     if (!error.isEmpty())
@@ -329,67 +444,26 @@ tuple<bool, QString> PboChecker::checkPbo(Pbo& pbo, const QString& bikeyPath, co
     pbo.nameHash = nameHash(pbo.headers);
     if (pbo.nameHash.isEmpty())
     {
-        return {true, "Signature checks 2 and 3 disabled"};
+        return {true, u"Signature checks 2 and 3 disabled"_s};
     }
     if (!checkSig2(ctx_.get(), publicKey, bisign, pbo))
     {
-        return {false, "Signature 2 mismatch"};
+        return {false, u"Signature 2 mismatch"_s};
     }
     pbo.fileHash = fileHash(pbo.headers, bisign.version, pboFile);
     if (verbose_)
     {
-        printer_->println("File Hash: " + pbo.fileHash.toHex().toUpper());
+        printer_->println(u"File Hash: "_s + pbo.fileHash.toHex().toUpper());
     }
     if (pbo.fileHash.isEmpty()) {
-        return {true, "Signature 3 unsupported"};
+        return {true, u"Signature 3 unsupported"_s};
     }
     const bool success = checkSig3(ctx_.get(), publicKey, bisign, pbo);
     if (success)
     {
         return {true, {}};
     }
-    return {false, "Signature 3 mismatch"};
-}
-
-QString PboChecker::findBikeyPath(const QString& modPath) const
-{
-    const QString cPath = casedPath(modPath + "/keys");
-    QDir modDir{cPath};
-    modDir.setNameFilters({"*.bikey"});
-    QStringList bikeyFiles = modDir.entryList(QDir::Files | QDir::NoSymLinks);
-    return bikeyFiles.isEmpty() ? QString{} : modDir.absoluteFilePath(bikeyFiles.first());
-}
-
-QString PboChecker::findBikeyPathWithPbo(const QString& pboFilePath) const
-{
-    // Look for bikey files in ../keys directory relative to the PBO file
-    QFileInfo pboInfo(pboFilePath);
-    const auto cPath = casedPath(pboInfo.absoluteDir().absolutePath() + "/../keys");
-    QDir keysDir{cPath};
-
-    if (keysDir.exists())
-    {
-        keysDir.setNameFilters({"*.bikey"});
-        QStringList bikeyFiles = keysDir.entryList(QDir::Files | QDir::NoSymLinks);
-        if (!bikeyFiles.isEmpty())
-        {
-            return keysDir.absoluteFilePath(bikeyFiles.first());
-        }
-    }
-    printer_->printWarn("No .bikey file found in " + keysDir.absolutePath());
-    return {};
-}
-
-QString PboChecker::findBisignFilePath(const QString& pboFilePath) const
-{
-    const QFileInfo pboFileInfo(pboFilePath);
-    QDir pboDir = pboFileInfo.absoluteDir();
-    const QString pboBaseName = pboFileInfo.completeBaseName();
-    QStringList filters;
-    filters << pboBaseName + "*.bisign";
-    pboDir.setNameFilters(filters);
-    QStringList bisignFiles = pboDir.entryList();
-    return bisignFiles.isEmpty() ? QString{} : pboDir.absoluteFilePath(bisignFiles.first());
+    return {false, u"Signature 3 mismatch"_s};
 }
 
 bool PboChecker::checkModSet(const QString& path)
@@ -399,7 +473,7 @@ bool PboChecker::checkModSet(const QString& path)
     bool allValid = true;
     for (const auto& modDir : modDirs)
     {
-        if (modDir.startsWith('@'))
+        if (modDir.startsWith('@'_L1))
         {
             const auto modPath = modSetDir.absoluteFilePath(modDir);
             // Success return value is false when bikey is not found
@@ -414,50 +488,69 @@ bool PboChecker::checkModSet(const QString& path)
 tuple<bool, QStringList> PboChecker::checkMod(const QString& path)
 {
     const auto modPath = path;
-    const auto bikeyPath = findBikeyPath(modPath);
-    if (bikeyPath.isEmpty())
+    const auto keysPath = modPath + u"/keys"_s;
+    const QStringList bikeyPaths = findBikeysInDir(keysPath);
+    
+    if (bikeyPaths.isEmpty())
     {
-        printer_->printWarn("\nUnable to find bikey for " + QFileInfo{path}.fileName());
+        printer_->printWarn(u"\nUnable to find bikey for "_s + QFileInfo{path}.fileName());
         return {false, {}};
     }
-    const auto cPath = PboChecker::casedPath(modPath + "/addons");
+    
+    const auto cPath = casedPath(modPath + u"/addons"_s);
     QDir modDir{cPath};
-    modDir.setNameFilters({"*.pbo"});
+    modDir.setNameFilters({u"*.pbo"_s});
     const QStringList pboFiles = modDir.entryList(QDir::Files | QDir::NoSymLinks);
 
     if (pboFiles.isEmpty())
     {
-        printer_->println("No PBO files found in " + modPath + "/addons\n");
+        printer_->println(u"No PBO files found in "_s + modPath + u"/addons\n"_s);
         return {false, {}};;
     }
 
     qint64 totalSize = 0;
     for (const auto& pboFile : pboFiles)
     {
-        QFile pboF{cPath + '/' + pboFile};
-        totalSize += pboF.size();
+        QFileInfo pboFileInfo(cPath + '/'_L1 + pboFile);
+        totalSize += pboFileInfo.size();
     }
     if (totalSize <= 0)
     {
-        printer_->printWarn("PBO files are empty\n");
+        printer_->printWarn(u"PBO files are empty\n"_s);
         return {false, {}};
     }
 
-    printer_->printHeader(QFileInfo{bikeyPath}.fileName(), QFileInfo{path}.fileName());
+    printer_->printHeader(toKeysStr(bikeyPaths), QFileInfo(path).fileName());
 
     QStringList brokenPboPaths;
     bool allSuccess = true;
     for (const auto& pboFile : pboFiles)
     {
-        const auto filePath = cPath + '/' + pboFile;
-        const auto [success,  extra] = checkPboPriv(filePath, bikeyPath);
-        if (!success)
+        const auto filePath = cPath + '/'_L1 + pboFile;
+        bool pboSuccess = false;
+        QString extraInfo;
+        
+        for (const auto& bikeyPath : bikeyPaths)
+        {
+            const auto [success, extra] = checkPboPriv(filePath, bikeyPath);
+            if (success)
+            {
+                pboSuccess = true;
+                extraInfo = extra;
+                break;
+            }
+            if (&bikeyPath == &bikeyPaths.last()) {
+                extraInfo = extra;
+            }
+        }
+        
+        if (!pboSuccess)
         {
             allSuccess = false;
             brokenPboPaths.append(filePath);
         }
         const auto fileName = QFileInfo(filePath).fileName();
-        printer_->printResult(fileName, success, extra);
+        printer_->printResult(fileName, pboSuccess, extraInfo);
     }
     if (allSuccess)
     {
@@ -497,35 +590,6 @@ void PboChecker::setPrinter(unique_ptr<PboCheckerPrinter>&& printer)
     printer_ = std::move(printer);
 }
 
-QString PboChecker::casedPath(const QString& path)
-{
-    QString pathCi = QFileInfo(path).absoluteFilePath();
-    //Construct case sentive path by comparing file or dir names to case sentive ones.
-    QStringList ciNames = pathCi.split('/');
-    QString casedPath = ciNames.first().endsWith(':') ? ciNames.first() + "/"
-                                                                     : u"/"_s;
-    ciNames.removeFirst(); //Drive letter on windows or "" on linux.
-
-    for (const QString& ciName : ciNames)
-    {
-        QDirIterator it(casedPath);
-        while (true)
-        {
-            if (!it.hasNext())
-            {
-                return {};
-            }
-            QFileInfo fi = it.nextFileInfo();
-            if (fi.fileName().toUpper() == ciName.toUpper())
-            {
-                casedPath += (casedPath.endsWith('/') ? "" : "/") + fi.fileName();
-                break;
-            }
-        }
-    }
-    return casedPath;
-}
-
 QByteArray PboChecker::nameHash(const QList<PboHeader>& headers) const
 {
     Q_ASSERT(!headers.isEmpty());
@@ -547,7 +611,7 @@ QByteArray PboChecker::nameHash(const QList<PboHeader>& headers) const
         {
             if (verbose_)
             {
-                printer_->printWarn("Odd file name detected: " + name  + " . Signature checks 2 and 3 disabled.");
+                printer_->printWarn(u"Odd file name detected: "_s + name  + u" . Signature checks 2 and 3 disabled."_s);
             }
             return {};
         }
@@ -557,12 +621,12 @@ QByteArray PboChecker::nameHash(const QList<PboHeader>& headers) const
             hasher.addData(name);
             if (verbose_)
             {
-                printer_->println("Hashing name: " + name);
+                printer_->println(u"Hashing name: "_s + name);
             }
         }
         else if (verbose_)
         {
-            printer_->println("Empty file: " + name);
+            printer_->println(u"Empty file: "_s + name);
         }
     }
     return hasher.result();
@@ -606,7 +670,7 @@ QByteArray PboChecker::fileHash(QList<PboHeader>& headers, quint32 version, QFil
             QByteArray data = pboFile.read(header.dataSize);
             if (verbose_)
             {
-                printer_->println("Hashing file: " + header.fileName);
+                printer_->println(u"Hashing file: "_s + header.fileName);
             }
             hasher.addData(data);
         }
@@ -654,7 +718,7 @@ optional<BiSign> PboChecker::readBisign(const QString& filePath) const
     QFile file{filePath};
     if (!file.open(QIODevice::ReadOnly))
     {
-        printer_->printWarn("Failed to open bisign file: " + file.fileName());
+        printer_->printWarn(u"Failed to open bisign file: "_s + file.fileName());
         return nullopt;
     }
     // Read name with null terminator
@@ -676,7 +740,7 @@ optional<BiSign> PboChecker::readBisign(const QString& filePath) const
     stream.skipRawData(4);  // stream >> bisign.exponent;
     if (keylength > 5000)
     {
-        printer_->printWarn("Key length is too large (" + QString::number(keylength) + "B). Probably corrupted signature file ... pos:" + QString::number(file.pos()));
+        printer_->printWarn(u"Key length is too large ("_s + QString::number(keylength) + u"B). Probably corrupted signature file ... pos:"_s + QString::number(file.pos()));
         return nullopt;
     }
 
@@ -689,7 +753,7 @@ optional<BiSign> PboChecker::readBisign(const QString& filePath) const
     bisign.sig1.resize(keyByteSize);
     if (file.bytesAvailable() >= keyByteSize && stream.readRawData(bisign.sig1.data(), keyByteSize) <= 0)
     {
-        printer_->printWarn("Failed to read signature 1");
+        printer_->printWarn(u"Failed to read signature 1"_s);
         return nullopt;
     }
     reverse(bisign.sig1.begin(), bisign.sig1.end());
@@ -697,7 +761,7 @@ optional<BiSign> PboChecker::readBisign(const QString& filePath) const
     // Read signature version
     if (file.bytesAvailable() < 8)
     {
-        printer_->printWarn("Failed to read signature version");
+        printer_->printWarn(u"Failed to read signature version"_s);
         return nullopt;
     }
     stream >> bisign.version;
@@ -706,7 +770,7 @@ optional<BiSign> PboChecker::readBisign(const QString& filePath) const
     bisign.sig2.resize(keyByteSize);
     if (file.bytesAvailable() >= keyByteSize && stream.readRawData(bisign.sig2.data(), keyByteSize) < keyByteSize)
     {
-        printer_->printWarn("Failed to read signature 2");
+        printer_->printWarn(u"Failed to read signature 2"_s);
         return nullopt;
     }
     reverse(bisign.sig2.begin(), bisign.sig2.end());
@@ -716,7 +780,7 @@ optional<BiSign> PboChecker::readBisign(const QString& filePath) const
     bisign.sig3.resize(keyByteSize);
     if (file.bytesAvailable() >= keyByteSize && stream.readRawData(bisign.sig3.data(), keyByteSize) < keyByteSize)
     {
-        printer_->printWarn("Failed to read signature 3");
+        printer_->printWarn(u"Failed to read signature 3"_s);
         return nullopt;
     }
     reverse(bisign.sig3.begin(), bisign.sig3.end());
@@ -728,7 +792,7 @@ optional<QByteArray> PboChecker::readPboChecksum(QFile& file) const
 {
     if (file.bytesAvailable() < 20)
     {
-        printer_->printWarn("File is too small to contain checksum");
+        printer_->printWarn(u"File is too small to contain checksum"_s);
         return nullopt;
     }
     file.seek(file.size() - 20);
@@ -741,7 +805,7 @@ optional<BiKey> PboChecker::readBiPublicKey(const QString& filePath) const
     BiKey publicKey;
     if (!file.open(QIODevice::ReadOnly))
     {
-        printer_->printWarn("Failed to open public key file: " + file.fileName());
+        printer_->printWarn(u"Failed to open public key file: "_s + file.fileName());
         return nullopt;
     }
     QDataStream in{&file};
@@ -754,7 +818,7 @@ optional<BiKey> PboChecker::readBiPublicKey(const QString& filePath) const
     }
     if (file.bytesAvailable() < 24)
     {
-        printer_->printWarn("File is too small to contain key length and exponent");
+        printer_->printWarn(u"File is too small to contain key length and exponent"_s);
         return nullopt;
     }
     quint32 keyByteLengthFile;
@@ -764,7 +828,7 @@ optional<BiKey> PboChecker::readBiPublicKey(const QString& filePath) const
     publicKey.byteLength = publicKey.length / 8;
     if (keyByteLengthFile != publicKey.byteLength + 20)
     {
-        printer_->printWarn("Invalid length of " + file.fileName());
+        printer_->printWarn(u"Invalid length of "_s + file.fileName());
         return nullopt;
     }
     in >> publicKey.exponent;
@@ -772,14 +836,15 @@ optional<BiKey> PboChecker::readBiPublicKey(const QString& filePath) const
     publicKey.m.resize(publicKey.byteLength);
     if (in.readRawData(publicKey.m.data(), publicKey.m.size()) != publicKey.m.size())
     {
-        printer_->printWarn("Failed to read m from " + file.fileName());
+        printer_->printWarn(u"Failed to read m from "_s + file.fileName());
         return nullopt;
     }
     reverse(publicKey.m.begin(), publicKey.m.end());
 
     if (!file.atEnd())
     {
-        printer_->printWarn("Unexpected data at the end of the file: " + file.fileName());
+        printer_->printWarn(u"Unexpected data at the end of the file: "_s
+                            + file.fileName());
         return nullopt;
     }
     Q_ASSERT(file.atEnd());
