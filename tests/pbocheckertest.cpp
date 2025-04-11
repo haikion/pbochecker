@@ -112,3 +112,16 @@ TEST_F(PboCheckerTest, checkPboFataA3)
     ASSERT_TRUE(success);
 }
 
+TEST_F(PboCheckerTest, checkPboAfiAce3Corrupted)
+{
+    PboChecker pboChecker;
+    const auto pbo = u":/@afi_ace3_corrupted/addons/ace_modules.pbo"_s;
+    ASSERT_TRUE(QFile::exists(pbo));
+    const auto bikey = u":/@afi_ace3_corrupted/keys/afi_ace3_1744288397.bikey"_s;
+    ASSERT_TRUE(QFile::exists(bikey));
+    const auto bisign = u":/@afi_ace3_corrupted/addons/ace_modules.pbo.afi_ace3_1744288397.bisign"_s;
+    ASSERT_TRUE(QFile::exists(bisign));
+    const bool success = get<0>(pboChecker.checkPbo(pbo, bikey, bisign));
+    ASSERT_FALSE(success);
+}
+
