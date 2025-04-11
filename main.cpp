@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
     QCoreApplication app{argc, argv};
     PboChecker pboChecker;
     const auto exeName = QFileInfo{QCoreApplication::applicationFilePath()}.fileName();
-    app.setApplicationVersion(u"0.1"_s);
+    app.setApplicationVersion(u"0.2"_s);
 
     QCommandLineParser parser;
     parser.addVersionOption();
