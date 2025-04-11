@@ -301,7 +301,7 @@ QStringList findBikeyPathsWithPbo(const QString& pboFilePath)
 
 QString findBisignFilePath(const QString& pboFilePath)
 {
-    const QFileInfo pboFileInfo(pboFilePath);
+    const QFileInfo pboFileInfo{pboFilePath};
     QDir pboDir = pboFileInfo.absoluteDir();
     const QString pboBaseName = pboFileInfo.completeBaseName();
     QStringList filters;

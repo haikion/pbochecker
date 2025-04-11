@@ -1,6 +1,9 @@
 #include "pbocheckerprinterqt.h"
 
 #include <QString>
+#include <QStringLiteral>
+
+using namespace Qt::StringLiterals;
 
 void PboCheckerPrinterQt::printHeader(const QString& keysStr, const QString& mod)
 {
@@ -18,7 +21,7 @@ void PboCheckerPrinterQt::printHeader(const QString& keysStr, const QString& mod
 
 void PboCheckerPrinterQt::printResult(const QString& fileName, bool success, const QString& extra)
 {
-    QString statusStr = success ? " \033[32mOK\033[0m " : "\033[31mFAIL\033[0m";
+    QString statusStr = success ? u" \033[32mOK\033[0m "_s : u"\033[31mFAIL\033[0m"_s;
     out_ << statusStr << " " << fileName;
     if (extra.isEmpty())
     {
